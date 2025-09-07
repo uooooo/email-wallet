@@ -16,6 +16,7 @@ use relayer_utils::{
     cryptos::{AccountCode, AccountSalt, PaddedEmailAddr},
     ParsedEmail, LOG,
 };
+use regex::Regex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use serde_json::Number;
@@ -419,7 +420,38 @@ pub async fn delete_safe_owner_api_fn(payload: String) -> Result<()> {
 }
 
 pub async fn receive_email_api_fn(email: String) -> Result<()> {
-    let parsed_email = ParsedEmail::new_from_raw_email(&email).await.unwrap();
+    let parsed = ParsedEmail::new_from_raw_email(&email).await;
+    // Fallback extract From header in case parsing fails (e.g., missing DKIM header)
+    let fallback_from = || -> Option<String> {
+        let re_angle = Regex::new(r"(?mi)^From:\s*.*<([^>]+)>").ok()?;
+        if let Some(c) = re_angle.captures(&email) {
+            return Some(c.get(1)?.as_str().to_string());
+        }
+        let re_plain = Regex::new(r"(?mi)^From:\s*([^\r\n<>]+@[^\r\n<>]+)").ok()?;
+        if let Some(c) = re_plain.captures(&email) {
+            return Some(c.get(1)?.as_str().trim().to_string());
+        }
+        None
+    };
+
+    if parsed.is_err() {
+        let err = parsed.err().unwrap();
+        error!(LOG, "Failed to parse email: {}", err);
+        if let Some(addr) = fallback_from() {
+            // Notify user with a helpful error instead of panicking the worker
+            tokio::spawn(async move {
+                let _ = handle_email_event(EmailWalletEvent::Error {
+                    email_addr: addr,
+                    error_subject: "Invalid email".to_string(),
+                    error: format!("{}", err),
+                })
+                .await;
+            });
+        }
+        return Ok(());
+    }
+
+    let parsed_email = parsed.unwrap();
     let from_addr = parsed_email.get_from_addr().unwrap();
     tokio::spawn(async move {
         match handle_email_event(EmailWalletEvent::Ack {

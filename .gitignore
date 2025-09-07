@@ -45,6 +45,8 @@ sql_database.db
 packages/prover/build/*
 packages/prover/params/*.zkey
 packages/prover/__pycache__/*
+packages/prover/params.zip
+**/.env.localdev
 
 # Subgraphs
 packages/subgraph/build

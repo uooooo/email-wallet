@@ -407,6 +407,13 @@ pub async fn send_email(email: EmailMessage) -> Result<()> {
 
     // Send POST request to email server
     let client = reqwest::Client::new();
+    // Debug: log outgoing email summary
+    println!(
+        "SMTP DEBUG request to={} to={} subject={}",
+        smtp_server,
+        email.to,
+        email.subject
+    );
     let response = client
         .post(smtp_server)
         .json(&email)
@@ -414,11 +421,12 @@ pub async fn send_email(email: EmailMessage) -> Result<()> {
         .await
         .map_err(|e| anyhow!("Failed to send email: {}", e))?;
 
-    if !response.status().is_success() {
-        return Err(anyhow!(
-            "Failed to send email: {}",
-            response.text().await.unwrap_or_default()
-        ));
+    let status = response.status();
+    let resp_text = response.text().await.unwrap_or_default();
+    println!("SMTP DEBUG response status={} body={}", status, resp_text);
+
+    if !status.is_success() {
+        return Err(anyhow!("Failed to send email: {}", resp_text));
     }
 
     Ok(())
